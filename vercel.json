@@ -1,7 +1,7 @@
 {
   "builds": [
     {
-      "src": "frontend/next.config.ts",
+      "src": "frontend/package.json",
       "use": "@vercel/next"
     },
     {
@@ -13,10 +13,6 @@
     {
       "source": "/api/(.*)",
       "destination": "/api/index.py"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/frontend/$1"
     }
   ]
 } 
