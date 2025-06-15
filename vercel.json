@@ -1,26 +1,16 @@
 {
-  "version": 2,
   "builds": [
     {
       "src": "api/index.py",
       "use": "@vercel/python"
     },
     {
-      "src": "frontend/package.json",
+      "src": "frontend/next.config.mjs",
       "use": "@vercel/next",
-      "config": {
-        "workPath": "frontend"
-      }
+      "config": { "workdir": "frontend" }
     }
   ],
   "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/frontend/$1"
-    }
+    { "source": "/api/(.*)", "destination": "/api" }
   ]
 } 
