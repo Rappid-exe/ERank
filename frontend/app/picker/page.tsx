@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
-import { BarChart, Leaf, Shield, Globe, Scale, PiggyBank, Briefcase, TrendingUp } from "lucide-react"
+import { Leaf, Shield, Globe, Scale } from "lucide-react"
 
 interface ScoreSet {
   military_score: number;

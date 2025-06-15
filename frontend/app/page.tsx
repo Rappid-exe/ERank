@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Search, TrendingUp, Shield, Heart, Leaf, AlertTriangle, CheckCircle, BarChart, Globe, Scale, PiggyBank, Briefcase } from "lucide-react"
+import { Search, TrendingUp, Shield, Heart, Leaf, AlertTriangle, CheckCircle, Globe, Scale, PiggyBank, Briefcase } from "lucide-react"
 
 interface ScoreItem {
   score: number;
@@ -57,12 +57,6 @@ const getScoreColor = (score: number) => {
   if (score >= 80) return "text-green-600"
   if (score >= 60) return "text-yellow-600"
   return "text-red-600"
-}
-
-const getScoreIcon = (score: number) => {
-  if (score >= 80) return <CheckCircle className="w-4 h-4 text-green-600" />
-  if (score >= 60) return <AlertTriangle className="w-4 h-4 text-yellow-600" />
-  return <AlertTriangle className="w-4 h-4 text-red-600" />
 }
 
 export default function FinancialRankingPage() {
@@ -288,7 +282,7 @@ export default function FinancialRankingPage() {
               <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
               <h3 className="text-lg font-semibold mb-2">No Results Found</h3>
               <p className="text-gray-600">
-                We couldn't find information for "{searchQuery}". Please try a different symbol or company name.
+                We couldn&apos;t find information for &quot;{searchQuery}&quot;. Please try a different symbol or company name.
               </p>
             </CardContent>
           </Card>
