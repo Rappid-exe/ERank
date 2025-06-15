@@ -1,14 +1,18 @@
 import os
-from typing import Dict, Optional, List
 import json
-import requests
-from pydantic import BaseModel
+import re
+from typing import Dict, List, Optional
+import yfinance as yf
+from pydantic import BaseModel, Field
+from openai import OpenAI
 
 class ScoreSet(BaseModel):
-    morality: int
-    social_impact: int
-    halal_compliance: int
-    esg_score: int
+    military_score: int
+    israel_score: int
+    environment_score: int
+    social_score: int
+    governance_score: int
+    sharia_compliance_score: int # This will be phased out for halal_status
     ethical_business: int
 
 class EvaluationDetails(BaseModel):
@@ -17,6 +21,16 @@ class EvaluationDetails(BaseModel):
     halal_status: str
     recommendation: str
 
+class MarketData(BaseModel):
+    current_price: Optional[float] = Field(None, alias="currentPrice")
+    day_high: Optional[float] = Field(None, alias="dayHigh")
+    day_low: Optional[float] = Field(None, alias="dayLow")
+    market_cap: Optional[int] = Field(None, alias="marketCap")
+    volume: Optional[int] = Field(None, alias="volume")
+    previous_close: Optional[float] = Field(None, alias="previousClose")
+    fifty_two_week_high: Optional[float] = Field(None, alias="fiftyTwoWeekHigh")
+    fifty_two_week_low: Optional[float] = Field(None, alias="fiftyTwoWeekLow")
+
 class StockEvaluation(BaseModel):
     symbol: str
     name: str
@@ -24,125 +38,154 @@ class StockEvaluation(BaseModel):
     overall_score: int
     scores: ScoreSet
     details: EvaluationDetails
+    market_data: Optional[MarketData] = None
+
+class StockSuggestion(BaseModel):
+    symbol: str
+    name: str
+    reasoning: str
 
 class StockScorer:
     def __init__(self):
-        self.api_key = os.getenv("OPENROUTER_API_KEY", "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")
-        self.api_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:8000",
-            "X-Title": "Islamic Stock Scorer"
-        }
+        self.api_key = os.getenv("OPENROUTER_API_KEY")
+        if not self.api_key:
+            raise ValueError("OPENROUTER_API_KEY not found in environment variables. Please set it in your .env file.")
         
-    def _get_llm_evaluation(self, prompt: str) -> dict:
-        """Get evaluation from LLM"""
-        payload = {
-            "model": "deepseek/deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "You are an expert in Islamic finance and ethical investment analysis. You must respond with a valid JSON object matching the requested structure precisely."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.3,
-            "response_format": {"type": "json_object"}
-        }
-        
+        self.client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=self.api_key,
+        )
+
+    def _get_market_data(self, symbol: str) -> Optional[MarketData]:
         try:
-            print("\nSending request to OpenRouter API...")
-            response = requests.post(self.api_url, headers=self.headers, json=payload)
-            response.raise_for_status()
-            result = response.json()
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
             
-            print(f"Raw API Response Body: {json.dumps(result, indent=2)}")
-            content = result['choices'][0]['message']['content']
+            if not info or info.get('quoteType') != 'EQUITY':
+                print(f"No valid equity data found for symbol: {symbol}")
+                return None
             
-            # --- Robust JSON Parsing ---
-            print(f"Raw Content from LLM: {content}")
-            
-            if isinstance(content, str):
-                # Clean the content string
-                content = content.strip()
-                if content.startswith('```json'):
-                    content = content[7:]
-                if content.endswith('```'):
-                    content = content[:-3]
-                content = content.strip()
-
-                try:
-                    return json.loads(content)
-                except json.JSONDecodeError as e:
-                    print(f"\nFailed to parse cleaned JSON: {str(e)}")
-                    print(f"Cleaned content was: {content}")
-                    return self._get_default_response() # Fallback to default
-            
-            # If content is already a dict (which it should be with response_format)
-            return content
-                
-        except Exception as e:
-            print(f"\nError calling OpenRouter API: {str(e)}")
-            if hasattr(e, 'response'):
-                print(f"Response status code: {e.response.status_code}")
-                print(f"Response content: {e.response.text}")
-            return self._get_default_response()
-
-    def _get_default_response(self) -> dict:
-        """Get a default error response"""
-        return {
-            "symbol": "ERROR",
-            "name": "Error during analysis",
-            "type": "Company",
-            "overall_score": 0,
-            "scores": {
-                "morality": 0, "social_impact": 0, "halal_compliance": 0,
-                "esg_score": 0, "ethical_business": 0
-            },
-            "details": {
-                "strengths": [],
-                "concerns": ["Failed to get a valid response from the AI model."],
-                "halal_status": "Questionable",
-                "recommendation": "Could not generate a recommendation due to an error."
+            market_data_raw = {
+                'currentPrice': info.get('currentPrice', info.get('regularMarketPrice')),
+                'dayHigh': info.get('dayHigh'),
+                'dayLow': info.get('dayLow'),
+                'marketCap': info.get('marketCap'),
+                'volume': info.get('volume'),
+                'previousClose': info.get('previousClose'),
+                'fiftyTwoWeekHigh': info.get('fiftyTwoWeekHigh'),
+                'fiftyTwoWeekLow': info.get('fiftyTwoWeekLow'),
             }
-        }
+            market_data = {k: v for k, v in market_data_raw.items() if v is not None}
+            return MarketData(**market_data)
+        except Exception as e:
+            print(f"Error fetching market data for {symbol}: {e}")
+            return None
+
+    def _get_llm_evaluation(self, prompt: str) -> Dict:
+        try:
+            completion = self.client.chat.completions.create(
+                model="anthropic/claude-3.5-sonnet",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+            )
+            response_content = completion.choices[0].message.content
+            # Strip markdown ```json ... ```
+            match = re.search(r'```json\s*([\s\S]*?)\s*```', response_content)
+            if match:
+                clean_json = match.group(1)
+            else:
+                clean_json = response_content
+            
+            return json.loads(clean_json)
+        except Exception as e:
+            print(f"Error getting evaluation from LLM: {e}")
+            # Return a default structure on failure to prevent crashes
+            return {}
 
     def evaluate_stock(self, company_name: str) -> StockEvaluation:
-        """
-        Evaluate a stock and return a comprehensive ethical and financial analysis.
-        """
         prompt = f"""
-        Analyze the company "{company_name}". I need a detailed ethical and financial ranking.
-        Research the company and return a JSON object with the following exact structure:
+        You are an ethical investment analyst. Your task is to evaluate a company based on its public information and provide a structured JSON response.
+        The company to evaluate is: **{company_name}**.
+        
+        Please return a single JSON object with the following structure:
         {{
-            "symbol": "string (the company's stock ticker, e.g., AAPL)",
-            "name": "string (the full company name, e.g., Apple Inc.)",
-            "type": "string (either 'Stock', 'ETF', or 'Company')",
-            "overall_score": "integer (a score from 0 to 100)",
+            "symbol": "string (The stock's ticker symbol)",
+            "name": "string (The full company name)",
+            "type": "Company",
+            "overall_score": "integer (0-100, based on all factors)",
             "scores": {{
-                "morality": "integer (0-100)",
-                "social_impact": "integer (0-100)",
-                "halal_compliance": "integer (0-100, based on Islamic finance principles)",
-                "esg_score": "integer (0-100, based on Environmental, Social, and Governance criteria)",
-                "ethical_business": "integer (0-100, based on business practices and governance)"
+                "military_score": "integer (0-100, where 100 is no involvement)",
+                "israel_score": "integer (0-100, where 100 is no controversial involvement)",
+                "environment_score": "integer (0-100, based on ESG data)",
+                "social_score": "integer (0-100, based on social impact and labor practices)",
+                "governance_score": "integer (0-100, based on corporate governance ratings)",
+                "sharia_compliance_score": "integer (0-100, based on financial ratios and business activities)",
+                "ethical_business": "integer (0-100, where 100 means no controversial business like tobacco, gambling)"
             }},
             "details": {{
-                "strengths": "array of strings (3-5 key positive points)",
-                "concerns": "array of strings (3-5 key negative points or risks)",
-                "halal_status": "string ('Compliant', 'Non-Compliant', or 'Questionable')",
-                "recommendation": "string (a brief, concluding investment recommendation)"
+                "strengths": ["string", "..."],
+                "concerns": ["string", "..."],
+                "halal_status": "string ('Permissible', 'Questionable', or 'Not Permissible')",
+                "recommendation": "string (A brief summary of the investment thesis)"
             }}
         }}
-
-        - For "halal_compliance", strictly evaluate based on factors like interest-based income, and involvement in prohibited sectors (alcohol, gambling, non-halal food).
-        - For "morality", consider factors like connections to military/defense, or involvement in oppressive regimes.
-        - Ensure all scores are integers between 0 and 100.
-        - If you cannot find a stock symbol, use a suitable placeholder.
         """
         
         evaluation_data = self._get_llm_evaluation(prompt)
+        if not evaluation_data:
+             raise ValueError("Failed to get a valid response from the AI model.")
 
-        # In case of API failure, the default response is already a dict.
-        # We just need to parse it into our Pydantic model for validation.
-        return StockEvaluation(**evaluation_data)
+        evaluation = StockEvaluation(**evaluation_data)
+
+        if evaluation.symbol:
+            evaluation.market_data = self._get_market_data(evaluation.symbol)
+        
+        return evaluation
+
+    def suggest_basket(self, risk_tolerance: str, investment_horizon: str, ethical_priorities: List[str], number_of_stocks: int) -> List[StockEvaluation]:
+        # This function now returns full evaluations, not just suggestions
+        prompt = f"""
+        Act as an expert portfolio manager. A user has provided their investment preferences.
+        Based on their answers below, suggest a basket of stocks.
+
+        **User Preferences:**
+        - **Risk Tolerance:** {risk_tolerance}
+        - **Investment Horizon:** {investment_horizon} years
+        - **Key Ethical Priorities:** {', '.join(ethical_priorities) if ethical_priorities else 'None specified, use a balanced approach.'}
+
+        **Your Task:**
+        1.  Analyze the user's preferences.
+        2.  Suggest a diversified basket of {number_of_stocks} stocks that aligns with their goals.
+        3.  For each stock, provide a brief reasoning for its inclusion.
+
+        Return your response as a JSON array of objects, where each object has the following exact structure:
+        [
+            {{
+                "symbol": "string (The stock's ticker symbol)",
+                "name": "string (The full company name)",
+                "reasoning": "string (A brief explanation for why this stock was chosen)"
+            }}
+        ]
+        """
+        
+        suggestions_data = self._get_llm_evaluation(prompt)
+        if not suggestions_data:
+            return []
+
+        # Now, evaluate each suggestion to get the full data
+        evaluated_stocks = []
+        for suggestion in suggestions_data:
+            try:
+                # We have the name, now we can run the full evaluation
+                company_name = suggestion.get("name")
+                if company_name:
+                    evaluation = self.evaluate_stock(company_name=company_name)
+                    evaluated_stocks.append(evaluation)
+            except Exception as e:
+                print(f"Could not evaluate {suggestion.get('name')}: {e}")
+                continue
+        
+        return evaluated_stocks[:number_of_stocks]
 
 
 # Example usage
@@ -150,6 +193,16 @@ if __name__ == "__main__":
     scorer = StockScorer()
     # Example evaluation for a single company name
     evaluation = scorer.evaluate_stock(company_name="Microsoft")
-    
+    print("\n--- Single Stock Evaluation ---")
     # Pydantic automatically serializes the model to a dict for printing
-    print(json.dumps(evaluation.dict(), indent=2)) 
+    print(json.dumps(evaluation.dict(), indent=2))
+
+    # Example basket suggestion
+    basket = scorer.suggest_basket(
+        risk_tolerance="medium",
+        investment_horizon="5-10",
+        ethical_priorities=["environment", "halal"],
+        number_of_stocks=4
+    )
+    print("\n--- Suggested Stock Basket ---")
+    print(json.dumps([s.dict() for s in basket], indent=2)) 

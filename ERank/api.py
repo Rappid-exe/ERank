@@ -1,8 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Dict
-from .stock_scorer import StockScorer
+from typing import Dict, List
+from dotenv import load_dotenv
+from .stock_scorer import StockScorer, StockEvaluation
 from fastapi.middleware.cors import CORSMiddleware
+
+load_dotenv()
 
 app = FastAPI(title="Islamic Stock Morality Scorer")
 
@@ -26,13 +29,32 @@ scorer = StockScorer()
 class StockNameRequest(BaseModel):
     company_name: str
 
-@app.post("/evaluate")
+class SurveyRequest(BaseModel):
+    risk_tolerance: str
+    investment_horizon: str
+    ethical_priorities: List[str]
+    number_of_stocks: int
+
+@app.post("/evaluate", response_model=StockEvaluation)
 async def evaluate_stock(request: StockNameRequest):
     try:
         evaluation = scorer.evaluate_stock(
             company_name=request.company_name,
         )
         return evaluation
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/suggest-basket")
+async def suggest_basket(request: SurveyRequest):
+    try:
+        suggestions = scorer.suggest_basket(
+            risk_tolerance=request.risk_tolerance,
+            investment_horizon=request.investment_horizon,
+            ethical_priorities=request.ethical_priorities,
+            number_of_stocks=request.number_of_stocks
+        )
+        return suggestions
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

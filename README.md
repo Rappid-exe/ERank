@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Islamic Stock Morality Scorer
 
 This tool evaluates stocks based on Islamic principles and ethical considerations, providing a morality score, a detailed analysis, and a Sharia compliance check.
@@ -96,3 +97,7 @@ Each category is analyzed, and the findings are used to generate a final ethics 
 ## Contributing
 
 Feel free to submit issues and enhancement requests! 
+=======
+# stock-morality
+Cheking the Islamic stock morality for the 2025 Haqqathon at Imperial
+>>>>>>> eb74dba75aa3f7463ae18d2bb676b8d5cd493de9
