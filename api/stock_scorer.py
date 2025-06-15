@@ -1,19 +1,23 @@
 import os
 import json
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import yfinance as yf
 from pydantic import BaseModel, Field
 from openai import OpenAI
 
+class ScoreItem(BaseModel):
+    score: int
+    notes: List[str]
+
 class ScoreSet(BaseModel):
-    military_score: int
-    israel_score: int
-    environment_score: int
-    social_score: int
-    governance_score: int
-    sharia_compliance_score: int # This will be phased out for halal_status
-    ethical_business: int
+    military: ScoreItem
+    israel: ScoreItem
+    environment: ScoreItem
+    social: ScoreItem
+    governance: ScoreItem
+    sharia_compliance: ScoreItem
+    ethical_business: ScoreItem
 
 class EvaluationDetails(BaseModel):
     strengths: List[str]
@@ -39,6 +43,7 @@ class StockEvaluation(BaseModel):
     scores: ScoreSet
     details: EvaluationDetails
     market_data: Optional[MarketData] = None
+    market_data_error: Optional[str] = None
 
 class StockSuggestion(BaseModel):
     symbol: str
@@ -56,14 +61,15 @@ class StockScorer:
             api_key=self.api_key,
         )
 
-    def _get_market_data(self, symbol: str) -> Optional[MarketData]:
+    def _get_market_data(self, symbol: str) -> Tuple[Optional[MarketData], Optional[str]]:
         try:
             ticker = yf.Ticker(symbol)
             info = ticker.info
             
-            if not info or info.get('quoteType') != 'EQUITY':
-                print(f"No valid equity data found for symbol: {symbol}")
-                return None
+            if not info or info.get('quoteType') != 'EQUITY' or 'currentPrice' not in info:
+                error_msg = f"No valid equity data found for symbol '{symbol}'. It may be delisted or an incorrect ticker."
+                print(error_msg)
+                return None, error_msg
             
             market_data_raw = {
                 'currentPrice': info.get('currentPrice', info.get('regularMarketPrice')),
@@ -76,10 +82,11 @@ class StockScorer:
                 'fiftyTwoWeekLow': info.get('fiftyTwoWeekLow'),
             }
             market_data = {k: v for k, v in market_data_raw.items() if v is not None}
-            return MarketData(**market_data)
+            return MarketData(**market_data), None
         except Exception as e:
-            print(f"Error fetching market data for {symbol}: {e}")
-            return None
+            error_msg = f"An unexpected error occurred while fetching market data for {symbol}: {e}"
+            print(error_msg)
+            return None, error_msg
 
     def _get_llm_evaluation(self, prompt: str) -> Dict:
         try:
@@ -114,13 +121,13 @@ class StockScorer:
             "type": "Company",
             "overall_score": "integer (0-100, based on all factors)",
             "scores": {{
-                "military_score": "integer (0-100, where 100 is no involvement)",
-                "israel_score": "integer (0-100, where 100 is no controversial involvement)",
-                "environment_score": "integer (0-100, based on ESG data)",
-                "social_score": "integer (0-100, based on social impact and labor practices)",
-                "governance_score": "integer (0-100, based on corporate governance ratings)",
-                "sharia_compliance_score": "integer (0-100, based on financial ratios and business activities)",
-                "ethical_business": "integer (0-100, where 100 means no controversial business like tobacco, gambling)"
+                "military": {{ "score": "integer (0-100)", "notes": ["string (1-2 brief notes explaining the score)", "..."] }},
+                "israel": {{ "score": "integer (0-100)", "notes": ["string (1-2 brief notes explaining the score)", "..."] }},
+                "environment": {{ "score": "integer (0-100)", "notes": ["string (1-2 brief notes explaining the score)", "..."] }},
+                "social": {{ "score": "integer (0-100)", "notes": ["string (1-2 brief notes explaining the score)", "..."] }},
+                "governance": {{ "score": "integer (0-100)", "notes": ["string (1-2 brief notes explaining the score)", "..."] }},
+                "sharia_compliance": {{ "score": "integer (0-100)", "notes": ["string (1-2 brief notes explaining the score)", "..."] }},
+                "ethical_business": {{ "score": "integer (0-100)", "notes": ["string (1-2 brief notes explaining the score)", "..."] }}
             }},
             "details": {{
                 "strengths": ["string", "..."],
@@ -129,6 +136,7 @@ class StockScorer:
                 "recommendation": "string (A brief summary of the investment thesis)"
             }}
         }}
+        For each item in "scores", provide 1-2 brief bullet points in the "notes" field explaining the reasoning for the numerical score.
         """
         
         evaluation_data = self._get_llm_evaluation(prompt)
@@ -138,7 +146,9 @@ class StockScorer:
         evaluation = StockEvaluation(**evaluation_data)
 
         if evaluation.symbol:
-            evaluation.market_data = self._get_market_data(evaluation.symbol)
+            market_data, error = self._get_market_data(evaluation.symbol)
+            evaluation.market_data = market_data
+            evaluation.market_data_error = error
         
         return evaluation
 

@@ -9,14 +9,19 @@ import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Search, TrendingUp, Shield, Heart, Leaf, AlertTriangle, CheckCircle, BarChart, Globe, Scale, PiggyBank, Briefcase } from "lucide-react"
 
+interface ScoreItem {
+  score: number;
+  notes: string[];
+}
+
 interface ScoreSet {
-  military_score: number;
-  israel_score: number;
-  environment_score: number;
-  social_score: number;
-  governance_score: number;
-  sharia_compliance_score: number;
-  ethical_business: number;
+  military: ScoreItem;
+  israel: ScoreItem;
+  environment: ScoreItem;
+  social: ScoreItem;
+  governance: ScoreItem;
+  sharia_compliance: ScoreItem;
+  ethical_business: ScoreItem;
 }
 
 interface EvaluationDetails {
@@ -45,6 +50,19 @@ interface RankingResult {
   scores: ScoreSet;
   details: EvaluationDetails;
   market_data: MarketData | null;
+  market_data_error: string | null;
+}
+
+const getScoreColor = (score: number) => {
+  if (score >= 80) return "text-green-600"
+  if (score >= 60) return "text-yellow-600"
+  return "text-red-600"
+}
+
+const getScoreIcon = (score: number) => {
+  if (score >= 80) return <CheckCircle className="w-4 h-4 text-green-600" />
+  if (score >= 60) return <AlertTriangle className="w-4 h-4 text-yellow-600" />
+  return <AlertTriangle className="w-4 h-4 text-red-600" />
 }
 
 export default function FinancialRankingPage() {
@@ -61,7 +79,7 @@ export default function FinancialRankingPage() {
     setError(null)
     
     try {
-      const response = await fetch("http://localhost:8000/evaluate", {
+      const response = await fetch("/api/evaluate", {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -90,22 +108,12 @@ export default function FinancialRankingPage() {
     }
   }
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return "text-green-600"
-    if (score >= 60) return "text-yellow-600"
-    return "text-red-600"
-  }
-
-  const getScoreIcon = (score: number) => {
-    if (score >= 80) return <CheckCircle className="w-4 h-4 text-green-600" />
-    if (score >= 60) return <AlertTriangle className="w-4 h-4 text-yellow-600" />
-    return <AlertTriangle className="w-4 h-4 text-red-600" />
-  }
-
   const getHalalBadgeColor = (status: string) => {
     switch (status) {
+      case "Permissible":
       case "Compliant":
         return "bg-green-100 text-green-800"
+      case "Not Permissible":
       case "Non-Compliant":
         return "bg-red-100 text-red-800"
       case "Questionable":
@@ -184,9 +192,19 @@ export default function FinancialRankingPage() {
                       </Badge>
                     </CardDescription>
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-blue-600">{searchResult.overall_score}/100</div>
-                    <div className="text-sm text-gray-600">Overall Score</div>
+                  <div className="flex items-center gap-6">
+                    {searchResult.market_data?.current_price && (
+                       <div className="text-center">
+                          <div className="text-3xl font-bold text-gray-800">
+                            {searchResult.market_data.current_price.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                          </div>
+                          <div className="text-sm text-gray-600">Current Price</div>
+                        </div>
+                    )}
+                    <div className="text-center">
+                      <div className="text-3xl font-bold text-blue-600">{searchResult.overall_score}/100</div>
+                      <div className="text-sm text-gray-600">Overall Score</div>
+                    </div>
                   </div>
                 </div>
               </CardHeader>
@@ -201,6 +219,7 @@ export default function FinancialRankingPage() {
 
               <TabsContent value="scores" className="space-y-6">
                 <ScoreCardGrid scores={searchResult.scores} />
+                <MarketDataDisplay data={searchResult.market_data} error={searchResult.market_data_error} />
               </TabsContent>
 
               <TabsContent value="analysis" className="space-y-6">
@@ -327,18 +346,18 @@ export default function FinancialRankingPage() {
 
 function ScoreCardGrid({ scores }: { scores: ScoreSet }) {
   const scoreItems = [
-    { title: "Military", score: scores.military_score, Icon: Shield },
-    { title: "Israel/Geopolitics", score: scores.israel_score, Icon: Globe },
-    { title: "Environment", score: scores.environment_score, Icon: Leaf },
-    { title: "Social", score: scores.social_score, Icon: Heart },
-    { title: "Governance", score: scores.governance_score, Icon: Scale },
-    { title: "Business Ethics", score: scores.ethical_business, Icon: Briefcase },
-    { title: "Sharia Compliance", score: scores.sharia_compliance_score, Icon: PiggyBank },
+    { title: "Military", data: scores.military, Icon: Shield },
+    { title: "Israel/Geopolitics", data: scores.israel, Icon: Globe },
+    { title: "Environment", data: scores.environment, Icon: Leaf },
+    { title: "Social", data: scores.social, Icon: Heart },
+    { title: "Governance", data: scores.governance, Icon: Scale },
+    { title: "Business Ethics", data: scores.ethical_business, Icon: Briefcase },
+    { title: "Sharia Compliance", data: scores.sharia_compliance, Icon: PiggyBank },
   ];
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-      {scoreItems.map(({ title, score, Icon }) => (
+      {scoreItems.map(({ title, data, Icon }) => (
         <Card key={title}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2 text-gray-600">
@@ -347,11 +366,19 @@ function ScoreCardGrid({ scores }: { scores: ScoreSet }) {
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-2 mb-2">
-              <span className={`text-2xl font-bold ${getScoreColor(score)}`}>
-                {score}/100
+              <span className={`text-2xl font-bold ${getScoreColor(data.score)}`}>
+                {data.score}/100
               </span>
             </div>
-            <Progress value={score} className="h-2" />
+            <Progress value={data.score} className="h-2" />
+            <ul className="mt-4 space-y-2 text-sm text-gray-600">
+              {data.notes.map((note, index) => (
+                <li key={index} className="flex items-start gap-2">
+                  <span className="mt-1.5 flex-shrink-0 h-1.5 w-1.5 rounded-full bg-gray-400"></span>
+                  <span>{note}</span>
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       ))}
@@ -359,7 +386,21 @@ function ScoreCardGrid({ scores }: { scores: ScoreSet }) {
   );
 }
 
-function MarketDataDisplay({ data }: { data: MarketData | null }) {
+function MarketDataDisplay({ data, error }: { data: MarketData | null, error: string | null }) {
+  if (error) {
+    return (
+      <div className="mt-6">
+        <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+          <TrendingUp className="w-5 h-5" /> Market Data
+        </h3>
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg text-center">
+          <p className="font-semibold">Could not load market data.</p>
+          <p className="text-sm">{error}</p>
+        </div>
+      </div>
+    )
+  }
+  
   if (!data) return null;
 
   const formatCurrency = (value: number | null) => 

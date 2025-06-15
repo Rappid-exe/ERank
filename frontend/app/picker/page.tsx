@@ -106,7 +106,7 @@ export default function StockPickerPage() {
     setError(null)
     
     try {
-      const response = await fetch("http://localhost:8000/suggest-basket", {
+      const response = await fetch("/api/suggest-basket", {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
